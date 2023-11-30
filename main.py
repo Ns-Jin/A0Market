@@ -1,13 +1,14 @@
 import psycopg2
+from datetime import date
 
 con = None
-current_name, current_role = None, None
+current_id, current_role = None, None
 
 def print_boundary():
     print("-" * 20)
 def login():
     global con
-    global current_name
+    global current_id
     global current_role
 
     input_id = input("ID: ")
@@ -24,9 +25,10 @@ def login():
 
         if result:
             current_role = result[0]
-            cur.execute(f"SELECT name FROM \"{current_role}\" WHERE ID = %s", (input_id,))
+            cur.execute(f"SELECT id, name FROM \"{current_role}\" WHERE ID = %s", (input_id,))
             result = cur.fetchone()
-            current_name = result[0]
+            current_id = result[0]
+            current_name = result[1]
             print("로그인 성공! Hi,", current_name, sep=" ")
             con.close()
             con = psycopg2.connect(
@@ -64,24 +66,21 @@ def register_user(cursor, input_id, input_password, input_nickname, email, role,
     create_user(input_id, input_password)
     # Todo: DB user를 등록하고 해당 user의 권한을 부여하기 위해 role을 만들고 해당 role을 부여
     if role == 1:  # User
-        cursor.execute("INSERT INTO \"User\" (ID, name, e_mail) VALUES (%s, %s, %s)", (input_id, input_nickname, email))
+        cursor.execute("INSERT INTO \"user\" (ID, name, e_mail) VALUES (%s, %s, %s)", (input_id, input_nickname, email))
         cursor.execute("INSERT INTO Register (ID, password, role) VALUES (%s, %s, %s)", (input_id, input_password, "user"))
-        cursor.execute(f"GRANT SELECT, INSERT ON TABLE market, product, enterprise, inspector TO {input_id}")
-        cursor.execute(f"GRANT ALL ON TABLE wish, \"User\", request TO {input_id}")
-        cursor.execute(f"GRANT DELETE, UPDATE ON TABLE register TO {input_id}")
+        cursor.execute(f"GRANT \"user\" TO {input_id}")
+        # cursor.execute(f"GRANT SELECT, INSERT ON TABLE market, product, enterprise, inspector TO {input_id}")
+        # cursor.execute(f"GRANT ALL ON TABLE wish, \"User\", request TO {input_id}")
+        # cursor.execute(f"GRANT DELETE, UPDATE ON TABLE register TO {input_id}")
     elif role == 2:  # Enterprise
         cursor.execute("INSERT INTO Enterprise (ID, name, e_mail) VALUES (%s, %s, %s)", (input_id, input_nickname, email))
         cursor.execute("INSERT INTO Register (ID, password, role) VALUES (%s, %s, %s)", (input_id, input_password, "enterprise"))
-        cursor.execute(f"GRANT SELECT, INSERT ON TABLE market, product, \"User\", inspector TO {input_id}")
-        cursor.execute(f"GRANT ALL ON TABLE wish, enterprise, request TO {input_id}")
-        cursor.execute(f"GRANT DELETE, UPDATE ON TABLE register TO {input_id}")
+        cursor.execute(f"GRANT \"enterprise\" TO {input_id}")
     elif role == 3:  # Inspector
         cursor.execute("INSERT INTO Inspector (ID, name, e_mail, introduce) VALUES (%s, %s, %s, %s)",
                        (input_id, input_nickname, email, inspector_introduce))
         cursor.execute("INSERT INTO Register (ID, password, role) VALUES (%s, %s, %s)", (input_id, input_password, "inspector"))
-        cursor.execute(f"GRANT SELECT, INSERT ON TABLE market, product, enterprise, \"User\" TO {input_id}")
-        cursor.execute(f"GRANT ALL ON TABLE wish, inspector, request TO {input_id}")
-        cursor.execute(f"GRANT DELETE, UPDATE ON TABLE register TO {input_id}")
+        cursor.execute(f"GRANT \"inspector\" TO {input_id}")
 
     con.commit()
 
@@ -197,37 +196,171 @@ def print_error_input():
 def print_logout():
     print("로그아웃 하였습니다.")
 
+def change_nickname(cur):
+    input_nickname = input("변경할 닉네임: ")
+    if len(input_nickname) < 20:
+        cur.execute(f"UPDATE \"{current_role}\" SET name = \'{input_nickname}\' WHERE id = \'{current_id}\'")
+        con.commit()
+        print("닉네임 변경 완료!")
+        return True
+
+    return False
+
+def confirm_password(cur):
+    input_password = input("현재 비밀번호: ")
+
+    cur.execute("SELECT * FROM Register WHERE ID = %s AND password = %s", (current_id, input_password))
+    result = cur.fetchone()
+    if result:
+        return True
+    else:
+        return False
+
+def account_setting(cur):
+    global con
+    while True:
+        print_boundary()
+        print("1. 닉네임 변경")
+        print("2. 비밀번호 변경")
+        print("3. 계정 삭제")
+        print("4. 이전")
+        print_boundary()
+        input_select = int(input("Select: "))
+        if input_select == 1:
+            if change_nickname(cur):
+                break
+            else:
+                print("닉네임 변경 실패")
+        elif input_select == 2:
+            if confirm_password(cur):
+                input_password = input("새로운 비밀번호: ")
+                if len(input_password) >= 8:
+                    cur.execute(f"UPDATE register SET password = \'{input_password}\' WHERE id = \'{current_id}\'")
+                    cur.execute(f"ALTER USER {current_id} WITH PASSWORD %s", (input_password,))
+                    con.commit()
+                else:
+                    print("비밀번호는 8자 이상 입력 해주세요.")
+            else:
+                print("잘못된 비밀번호입니다.")
+        elif input_select == 3:
+            if confirm_password(cur):
+                input_reconfirm = input("정말로 삭제 하시겠습니까? (Y/N)")
+                if input_reconfirm == 'Y':
+                    cur.execute(f"DELETE FROM register WHERE id = \'{current_id}\'")
+                    cur.execute(f"DELETE FROM \"{current_role}\" WHERE id = \'{current_id}\'")
+                    con.commit()
+                    con.close()
+                    con = psycopg2.connect(
+                        database='sample2023',
+                        user='db2023',
+                        password='db!2023',
+                        host='::1',
+                        port='5432'
+                    )
+                    cur = con.cursor()
+                    cur.execute(f"DROP USER {current_id}") # Todo
+                    con.commit()
+                    print("계정이 삭제되었습니다.")
+                    return False
+                else:
+                    print("계정 삭제를 취소합니다.")
+            else:
+                print("잘못된 비밀번호입니다.")
+        elif input_select == 4:
+            break
+        else:
+            print_error_input()
+
+    return True
+
+def print_market(cur):
+    sql_query = """
+                    SELECT E.name, P.product_name, P.product_description, P.price, M.enrollment_date, P.category, P.certification
+                    FROM Product P  
+                    JOIN Market M ON P.product_id = M.product_id
+                    JOIN Enterprise E ON P.enterprise_id = E.ID;
+                """
+    cur.execute(sql_query)
+    result = cur.fetchall()
+    print(result)
+
+def register_product(cur):
+    cur.execute("SELECT product_id FROM product")
+    result = cur.fetchall()
+    if len(result) == 0:
+        product_id = 1
+    else:
+        cur.execute("SELECT MAX(product_id) FROM product")
+        result = cur.fetchall()
+        product_id = int(result[0][0]) + 1
+
+    enterprise_id = current_id
+    product_name = input("제품 이름: ")
+    product_description = input("제품 설명: ")
+    print("---------카테고리---------")
+    print("1. 식품")
+    print("2. 전자제품")
+    print("3. 생활용품")
+    print("-------------------------")
+    category = None
+    while True:
+        category = int(input("Select: "))
+        if 1 <= category <= 3:
+            if category == 1:
+                category = "food"
+            elif category == 2:
+                category = "electronic"
+            else:
+                category = "household"
+            break
+        print_error_input()
+    price = int(input("가격: "))
+    cur.execute("INSERT INTO product (product_id, enterprise_id, product_name, product_description, category, price) VALUES (%s, %s, %s, %s, %s, %s)", (product_id, enterprise_id, product_name, product_description, category, price))
+    cur.execute("INSERT INTO market (product_id, enrollment_date) VALUES (%s, %s)", (product_id, date.today()))
+    con.commit()
+    print("제품 등록 완료")
 def user_action():
     while True:
         print_user_menu()
         input_select = int(input("Select: "))
-        if input_select == 1:       # 시장 조회
-            cur = con.cursor()
-            # SQL 쿼리 작성
-            sql_query = """
-                SELECT E.name, P.product_name, P.product_description, P.price, M.enrollment_date, P.category, P.certification
-                FROM Product P
-                JOIN Market M ON P.product_id = M.product_id
-                JOIN Enterprise E ON P.enterpriseID = E.ID;
-            """
-            # 쿼리 실행
-            cur.execute(sql_query)
-            # 결과 가져오기
-            result = cur.fetchall()
-            print(result)
-        # elif input_select == 2:     # 구매 현황 조회
-        # elif input_select == 3:     # 계정 설정
-        # elif input_select == 4:     # 로그아웃
-        #     print_logout()
-        #     break
+        cur = con.cursor()
+        if input_select == 1:       # 시장 조회 Todo
+            print_market(cur)
+        elif input_select == 2:     # 구매 현황 조회 Todo
+            print("Todo")
+        elif input_select == 3:     # 계정 설정
+            if not account_setting(cur):     # 계정 삭제됐다면
+                break
+        elif input_select == 4:     # 로그아웃
+            print_logout()
+            break
         else:
             print_error_input()
-
 
 def enterprise_action():
     while True:
         print_enterprise_menu()
         input_select = int(input("Select: "))
+        cur = con.cursor()
+        if input_select == 1:       # 시장 조회
+            print_market(cur)
+        elif input_select == 2:   # 판매 물품 등록
+            register_product(cur)
+        # elif input_select == 3:   # 판매 현황 조회
+        # elif input_select == 4:   # 검점자와 interaction
+        # elif input_select == 5:   # 정산
+        elif input_select == 6:     # 계정 설정
+            if not account_setting(cur):
+                break
+
+        elif input_select == 7:     # 로그아웃
+            print_logout()
+            break
+        else:
+            print_error_input()
+
+
+
 def inspector_action():
     while True:
         print_inspector_menu()
@@ -246,10 +379,10 @@ if __name__ == '__main__':
         if not enter():
             break
 
-        if current_role == "User":
+        if current_role == "user":
             user_action()
-        elif current_role == "Enterprise":
+        elif current_role == "enterprise":
             enterprise_action()
-        elif current_role == "Inspector":
+        elif current_role == "inspector":
             inspector_action()
         con.close()
