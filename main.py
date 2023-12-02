@@ -64,7 +64,6 @@ def create_user(user_id, password):
 
 def register_user(cursor, input_id, input_password, input_nickname, email, role, inspector_introduce=None):
     create_user(input_id, input_password)
-    # Todo: DB user를 등록하고 해당 user의 권한을 부여하기 위해 role을 만들고 해당 role을 부여
     if role == 1:  # User
         cursor.execute("INSERT INTO \"user\" (ID, name, e_mail) VALUES (%s, %s, %s)", (input_id, input_nickname, email))
         cursor.execute("INSERT INTO Register (ID, password, role) VALUES (%s, %s, %s)", (input_id, input_password, "user"))
@@ -138,8 +137,6 @@ def register():
     cur.close()
     return True
 
-def manage():
-    print("Todo: Manage Database")
 def enter():
     while True:
         print_boundary()
@@ -167,9 +164,12 @@ def enter():
 def print_user_menu():
     print_boundary()
     print("1. 시장조회")
-    print("2. 구매 현황 조회")
-    print("3. 계정 설정")
-    print("4. 로그아웃")
+    print("2. 물품구매")
+    print("3. 점검요청")
+    print("4. 구매 현황 조회")
+    print("5. 점검 현황 조회")
+    print("6. 계정 설정")
+    print("7. 로그아웃")
     print_boundary()
 
 def print_enterprise_menu():
@@ -177,17 +177,19 @@ def print_enterprise_menu():
     print("1. 시장 조회")
     print("2. 판매 물품 등록")
     print("3. 판매 현황 조회")
-    print("4. 검점자와 interaction")
-    print("5. 정산")
+    print("4. 점검 요청")
+    print("5. 점검 현황 조회")
     print("6. 계정 설정")
     print("7. 로그아웃")
     print_boundary()
 def print_inspector_menu():
     print_boundary()
     print("1. 시장 조회")
-    print("2. 정산")
-    print("3. 계정 설정")
-    print("4. 로그아웃")
+    print("2. 점검 리스트")
+    print("3. 점검 완료 처리")
+    print("4. 소개 변경")
+    print("5. 계정 설정")
+    print("6. 로그아웃")
     print_boundary()
 
 def print_error_input():
@@ -246,9 +248,6 @@ def account_setting(cur):
             if confirm_password(cur):
                 input_reconfirm = input("정말로 삭제 하시겠습니까? (Y/N)")
                 if input_reconfirm == 'Y':
-                    cur.execute(f"DELETE FROM register WHERE id = \'{current_id}\'")
-                    cur.execute(f"DELETE FROM \"{current_role}\" WHERE id = \'{current_id}\'")
-                    con.commit()
                     con.close()
                     con = psycopg2.connect(
                         database='sample2023',
@@ -258,7 +257,9 @@ def account_setting(cur):
                         port='5432'
                     )
                     cur = con.cursor()
-                    cur.execute(f"DROP USER {current_id}") # Todo
+                    cur.execute(f"DELETE FROM register WHERE id = \'{current_id}\'")
+                    cur.execute(f"DELETE FROM \"{current_role}\" WHERE id = \'{current_id}\'")
+                    cur.execute(f"DROP USER {current_id}")
                     con.commit()
                     print("계정이 삭제되었습니다.")
                     return False
@@ -275,14 +276,17 @@ def account_setting(cur):
 
 def print_market(cur):
     sql_query = """
-                    SELECT E.name, P.product_name, P.product_description, P.price, M.enrollment_date, P.category, P.certification
+                    SELECT E.name, P.product_name, P.product_description, P.price, P.category, P.certification, M.enrollment_date, P.product_id
                     FROM Product P  
                     JOIN Market M ON P.product_id = M.product_id
                     JOIN Enterprise E ON P.enterprise_id = E.ID;
                 """
     cur.execute(sql_query)
     result = cur.fetchall()
-    print(result)
+
+    print(f"|{'제품 ID'.center(15)}|{'회사명'.center(15)}|{'상품명'.center(15)}|{'상품 설명'.center(15)}|{'가격'.center(15)}|{'카테고리'.center(15)}|{'인증'.center(15)}|{'등록일자'.center(15)}|")
+    for record in result:
+        print(f"|{record[7].center(15)}|{record[0].center(15)}|{record[1].center(15)}|{record[2].center(15)}|{str(record[3]).center(15)}|{record[4].center(15)}|{str(record[5]).center(15)}|{str(record[6]).center(15)}|")
 
 def register_product(cur):
     cur.execute("SELECT product_id FROM product")
@@ -319,23 +323,183 @@ def register_product(cur):
     cur.execute("INSERT INTO market (product_id, enrollment_date) VALUES (%s, %s)", (product_id, date.today()))
     con.commit()
     print("제품 등록 완료")
+
+def buy_product(cur):
+    print_boundary()
+    select_product_id = input("구매하려는 상품 ID를 입력하세요.\nSelect: ")
+    sql_query = f"""
+                        SELECT E.name, P.product_name, P.product_description, P.price, P.category, P.certification, M.enrollment_date, P.product_id
+                        FROM Product P  
+                        JOIN Market M ON P.product_id = M.product_id
+                        JOIN Enterprise E ON P.enterprise_id = E.ID
+                        WHERE P.product_id = \'{(select_product_id)}\' and P.phase_owner IS NULL;
+                    """
+    cur.execute(sql_query)
+    result = cur.fetchall()
+    if len(result) == 1:        # 해당 제품이 있다면
+        record = result[0]
+        print(f"|{record[7].center(15)}|{record[0].center(15)}|{record[1].center(15)}|{record[2].center(15)}|{str(record[3]).center(15)}|{record[4].center(15)}|{str(record[5]).center(15)}|{str(record[6]).center(15)}|")
+        select_confirm = input("구매하려는 상품이 맞습니까? (Y/N): ")
+        if select_confirm == 'Y':
+            cur.execute(f"UPDATE Product SET phase_owner = \'{current_id}\' WHERE product_id = \'{select_product_id}\'")
+            cur.execute(f"DELETE FROM market WHERE product_id = \'{select_product_id}\'")
+            print("상품을 구매하였습니다.")
+            con.commit()
+        else:
+            print("상품 구매를 취소합니다.")
+    else:
+        print("상품이 존재하지 않습니다.")
+    print_boundary()
+
+def print_inspector_list(cur):
+    sql_query = f"""
+                        SELECT id, name, e_mail, introduce
+                        FROM inspector;
+                    """
+    cur.execute(sql_query)
+    result = cur.fetchall()
+    print("점검자 리스트")
+    print(f"|{'점검자 ID'.center(15)}|{'이름'.center(15)}|{'E-Mail'.center(15)}|{'소개'.center(15)}|")
+    for record in result:
+        print(f"|{record[0].center(15)}|{record[1].center(15)}|{record[2].center(15)}|{record[3].center(15)}|")
+
+def user_request_inspection(cur):
+    print_inspector_list(cur)
+    print("점검요청")
+    request_product = input("상품 ID: ")
+    request_inspector_id = input("점검자 ID: ")
+    request_message = input("요청 사항: ")
+
+    cur.execute(f"select * from product where product_id = \'{request_product}\' AND phase_owner = \'{current_id}\' AND certification = False")
+    result = cur.fetchall()
+    if len(result) == 0:
+        print("본인이 구매한 제품, 인증이 안된 제품만 의뢰가능합니다.")
+        return
+
+    cur.execute(f"select * from inspector where id = \'{request_inspector_id}\'")
+    result = cur.fetchall()
+    if len(result) == 0:
+        print("없는 점검자 입니다.")
+        return
+
+    cur.execute(f"insert into request(request_product_id, client_id, inspector_id, request_message) values (\'{request_product}\',\'{current_id}\',\'{request_inspector_id}\',\'{request_message}\')")
+    con.commit()
+    print("점검 요청 성공")
+
+
+def print_phase_list(cur):
+    print_boundary()
+    sql_query = f"""
+                            SELECT E.name, P.product_name, P.product_description, P.price, P.category, P.certification, P.product_id
+                            FROM Product P  
+                            JOIN Enterprise E ON P.enterprise_id = E.ID
+                            WHERE P.phase_owner = \'{current_id}\';
+                        """
+    cur.execute(sql_query)
+    result = cur.fetchall()
+    
+    print("나의 구매 리스트")
+    if len(result) > 0:
+        print(f"|{'제품 ID'.center(15)}|{'회사명'.center(15)}|{'상품명'.center(15)}|{'상품 설명'.center(15)}|{'가격'.center(15)}|{'카테고리'.center(15)}|{'인증'.center(15)}|")
+        for record in result:
+            print(f"|{record[6].center(15)}|{record[0].center(15)}|{record[1].center(15)}|{record[2].center(15)}|{str(record[3]).center(15)}|{record[4].center(15)}|{str(record[5]).center(15)}|")
+    else:
+        print("비어있음")
+
+    print_boundary()
+
+def print_request_list(cur):
+    print_boundary()
+    sql_query = f"""
+                        SELECT request_product_id, inspector_id, request_message, request_complete
+                        FROM request  
+                        WHERE client_id = \'{current_id}\';
+                    """
+    cur.execute(sql_query)
+    result = cur.fetchall()
+
+    print("나의 점검 현황")
+    if len(result) > 0:
+        print(f"|{'제품 ID'.center(15)}|{'점검자 ID'.center(15)}|{'점검 요청사항'.center(15)}|{'완료 여부'.center(15)}|")
+        for record in result:
+            print(f"|{record[0].center(15)}|{record[1].center(15)}|{record[2].center(15)}|{str(record[3]).center(15)}|")
+    else:
+        print("비어있음")
+
+    print_boundary()
+
 def user_action():
     while True:
         print_user_menu()
         input_select = int(input("Select: "))
         cur = con.cursor()
-        if input_select == 1:       # 시장 조회 Todo
+        if input_select == 1:       # 시장 조회 Todo: 정렬방식 선택?
             print_market(cur)
-        elif input_select == 2:     # 구매 현황 조회 Todo
-            print("Todo")
-        elif input_select == 3:     # 계정 설정
+        elif input_select == 2:     # 물품구매
+            buy_product(cur)
+        elif input_select == 3:     # 점검요청
+            user_request_inspection(cur)
+        elif input_select == 4:     # 구매 현황 조회
+            print_phase_list(cur)
+        elif input_select == 5:
+            print_request_list(cur)
+        elif input_select == 6:     # 계정 설정
             if not account_setting(cur):     # 계정 삭제됐다면
                 break
-        elif input_select == 4:     # 로그아웃
+        elif input_select == 7:     # 로그아웃
             print_logout()
             break
         else:
             print_error_input()
+
+def print_my_product(cur):
+    print_boundary()
+    sql_query = f"""
+                    SELECT E.name, P.product_name, P.product_description, P.price, P.category, P.certification, P.product_id, P.phase_owner
+                    FROM Product P  
+                    JOIN Enterprise E ON P.enterprise_id = E.ID
+                    WHERE E.id = \'{current_id}\';
+                """
+    cur.execute(sql_query)
+    result = cur.fetchall()
+
+    print("기업 판매 리스트")
+    if len(result) > 0:
+        print(f"|{'제품 ID'.center(15)}|{'회사명'.center(15)}|{'상품명'.center(15)}|{'상품 설명'.center(15)}|{'가격'.center(15)}|{'카테고리'.center(15)}|{'인증'.center(15)}|{'판매여부'.center(15)}|")
+        for record in result:
+            print(f"|{record[6].center(15)}|{record[0].center(15)}|{record[1].center(15)}|{record[2].center(15)}|{str(record[3]).center(15)}|{record[4].center(15)}|{str(record[5]).center(15)}|", end="")
+            if str(record[7]) == "NULL":
+                print("False|")
+            else:
+                print("True|")
+    else:
+        print("비어있음")
+    print_boundary()
+
+def enterprise_request_inspection(cur):
+    print_boundary()
+    print_inspector_list(cur)
+    print("점검요청")
+    request_product = input("상품 ID: ")
+    request_inspector_id = input("점검자 ID: ")
+    request_message = input("요청 사항: ")
+
+    cur.execute(f"select * from product where product_id = \'{request_product}\' AND enterprise_id = \'{current_id}\' AND certification = False")
+    result = cur.fetchall()
+    if len(result) == 0:
+        print("자사 제품, 인증이 안된 제품만 의뢰가능합니다.")
+        return
+
+    cur.execute(f"select * from inspector where id = \'{request_inspector_id}\'")
+    result = cur.fetchall()
+    if len(result) == 0:
+        print("없는 점검자 입니다.")
+        return
+
+    cur.execute(f"insert into request(request_product_id, client_id, inspector_id, request_message) values (\'{request_product}\',\'{current_id}\',\'{request_inspector_id}\',\'{request_message}\')")
+    con.commit()
+    print("점검 요청 성공")
+    print_boundary()
 
 def enterprise_action():
     while True:
@@ -346,25 +510,91 @@ def enterprise_action():
             print_market(cur)
         elif input_select == 2:   # 판매 물품 등록
             register_product(cur)
-        # elif input_select == 3:   # 판매 현황 조회
-        # elif input_select == 4:   # 검점자와 interaction
-        # elif input_select == 5:   # 정산
+        elif input_select == 3:   # 판매 현황 조회
+            print_my_product(cur)
+        elif input_select == 4:   # 검점요청
+            enterprise_request_inspection(cur)
+        elif input_select == 5:   # 점검 현황 조회
+            print_request_list(cur)
         elif input_select == 6:     # 계정 설정
             if not account_setting(cur):
                 break
-
         elif input_select == 7:     # 로그아웃
             print_logout()
             break
         else:
             print_error_input()
 
+def request_list(cur):
+    print_boundary()
+    print("----- 미완료 요청 -----")
+    cur.execute(f"select request_product_id, client_id, request_message from request where inspector_id = \'{current_id}\' AND request_complete = False")
+    result = cur.fetchall()
+    print(f"|{'제품 ID'.center(15)}|{'고객 ID'.center(15)}|{'요청 사항'.center(15)}|")
+    for record in result:
+        print(f"|{record[0].center(15)}|{record[1].center(15)}|{record[2].center(15)}|")
+    print("----- 완료 요청 -----")
+    cur.execute(f"select request_product_id, client_id, request_message from request where inspector_id = \'{current_id}\' AND request_complete = True")
+    result = cur.fetchall()
+    print(f"|{'제품 ID'.center(15)}|{'고객 ID'.center(15)}|{'요청 사항'.center(15)}|")
+    for record in result:
+        print(f"|{record[0].center(15)}|{record[1].center(15)}|{record[2].center(15)}|")
+    print_boundary()
 
+def complete_request(cur):
+    print_boundary()
+    print("----- 미완료 요청 -----")
+    cur.execute(f"select request_product_id, client_id, request_message from request where inspector_id = \'{current_id}\' AND request_complete = False")
+    result = cur.fetchall()
+    print(f"|{'제품 ID'.center(15)}|{'고객 ID'.center(15)}|{'요청 사항'.center(15)}|")
+    for record in result:
+        print(f"|{record[0].center(15)}|{record[1].center(15)}|{record[2].center(15)}|")
+
+    select_product_id = input("완료할 상품 ID: ")
+    select_certification = input("인증 가능 유무(Y/N): ")
+    if select_certification == 'Y':
+        cur.execute(f"UPDATE product SET certification = True WHERE product_id = \'{select_product_id}\'")
+    elif select_certification == 'N':
+        cur.execute(f"UPDATE product SET certification = False WHERE product_id = \'{select_product_id}\'")
+    else:
+        print_error_input()
+        return
+    cur.execute(f"UPDATE request SET request_complete = True WHERE request_product_id = \'{select_product_id}\'")
+    con.commit()
+    print("점검을 완료했습니다.")
+
+    print_boundary()
+
+def change_introduce(cur):
+    print_boundary()
+    new_introduce = input("변경할 소개 내용을 입력해주세요.\n입력: ")
+    cur.execute(f"UPDATE inspector SET introduce = \'{new_introduce}\' WHERE id = \'{current_id}\'")
+    con.commit()
+    print("소개가 변경되었습니다.")
+    print_boundary()
 
 def inspector_action():
     while True:
         print_inspector_menu()
         input_select = int(input("Select: "))
+        cur = con.cursor()
+
+        if input_select == 1:       # 시장 조회
+            print_market(cur)
+        elif input_select == 2:   # 요청된 점검 리스트
+            request_list(cur)
+        elif input_select == 3:   # 점검 완료 처리
+            complete_request(cur)
+        elif input_select == 4:   # 소개 변경
+            change_introduce(cur)
+        elif input_select == 5:  # 계정 설정
+            if not account_setting(cur):
+                break
+        elif input_select == 6:  # 로그아웃
+            print_logout()
+            break
+        else:
+            print_error_input()
 
 if __name__ == '__main__':
 
