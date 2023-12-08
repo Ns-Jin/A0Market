@@ -1,5 +1,6 @@
 import psycopg2
 from datetime import date
+import hashlib
 
 con = None
 current_id, current_role = None, None
@@ -18,12 +19,14 @@ def login():
 
     try:
         # 입력 받은 ID와 Password를 사용하여 쿼리 실행
-        cur.execute("SELECT role FROM Register WHERE ID = %s AND password = %s", (input_id, input_password))
+        cur.execute("SELECT role, password FROM Register WHERE ID = %s", (input_id, ))
 
         # 결과 가져오기
         result = cur.fetchone()
 
-        if result:
+        hashed_password = hashlib.sha256(input_password.encode('utf-8')).hexdigest()
+
+        if result and hashed_password == result[1]:
             current_role = result[0]
             cur.execute(f"SELECT id, name FROM \"{current_role}\" WHERE ID = %s", (input_id,))
             result = cur.fetchone()
@@ -63,22 +66,23 @@ def create_user(user_id, password):
         print(f"Error: {e}")
 
 def register_user(cursor, input_id, input_password, input_nickname, email, role, inspector_introduce=None):
+    hashed_password = hashlib.sha256(input_password.encode('utf-8')).hexdigest()
     create_user(input_id, input_password)
     if role == 1:  # User
         cursor.execute("INSERT INTO \"user\" (ID, name, e_mail) VALUES (%s, %s, %s)", (input_id, input_nickname, email))
-        cursor.execute("INSERT INTO Register (ID, password, role) VALUES (%s, %s, %s)", (input_id, input_password, "user"))
+        cursor.execute("INSERT INTO Register (ID, password, role) VALUES (%s, %s, %s)", (input_id, hashed_password, "user"))
         cursor.execute(f"GRANT \"user\" TO {input_id}")
         # cursor.execute(f"GRANT SELECT, INSERT ON TABLE market, product, enterprise, inspector TO {input_id}")
         # cursor.execute(f"GRANT ALL ON TABLE wish, \"User\", request TO {input_id}")
         # cursor.execute(f"GRANT DELETE, UPDATE ON TABLE register TO {input_id}")
     elif role == 2:  # Enterprise
         cursor.execute("INSERT INTO Enterprise (ID, name, e_mail) VALUES (%s, %s, %s)", (input_id, input_nickname, email))
-        cursor.execute("INSERT INTO Register (ID, password, role) VALUES (%s, %s, %s)", (input_id, input_password, "enterprise"))
+        cursor.execute("INSERT INTO Register (ID, password, role) VALUES (%s, %s, %s)", (input_id, hashed_password, "enterprise"))
         cursor.execute(f"GRANT \"enterprise\" TO {input_id}")
     elif role == 3:  # Inspector
         cursor.execute("INSERT INTO Inspector (ID, name, e_mail, introduce) VALUES (%s, %s, %s, %s)",
                        (input_id, input_nickname, email, inspector_introduce))
-        cursor.execute("INSERT INTO Register (ID, password, role) VALUES (%s, %s, %s)", (input_id, input_password, "inspector"))
+        cursor.execute("INSERT INTO Register (ID, password, role) VALUES (%s, %s, %s)", (input_id, hashed_password, "inspector"))
         cursor.execute(f"GRANT \"inspector\" TO {input_id}")
 
     con.commit()
@@ -136,6 +140,9 @@ def register():
     print_boundary()
     cur.close()
     return True
+
+def manage():
+    print("Dev...")
 
 def enter():
     while True:
@@ -211,7 +218,8 @@ def change_nickname(cur):
 def confirm_password(cur):
     input_password = input("현재 비밀번호: ")
 
-    cur.execute("SELECT * FROM Register WHERE ID = %s AND password = %s", (current_id, input_password))
+    hashed_password = hashlib.sha256(input_password.encode('utf-8')).hexdigest()
+    cur.execute("SELECT * FROM Register WHERE ID = %s AND password = %s", (current_id, hashed_password))
     result = cur.fetchone()
     if result:
         return True
@@ -237,7 +245,8 @@ def account_setting(cur):
             if confirm_password(cur):
                 input_password = input("새로운 비밀번호: ")
                 if len(input_password) >= 8:
-                    cur.execute(f"UPDATE register SET password = \'{input_password}\' WHERE id = \'{current_id}\'")
+                    hashed_password = hashlib.sha256(input_password.encode('utf-8')).hexdigest()
+                    cur.execute(f"UPDATE register SET password = \'{hashed_password}\' WHERE id = \'{current_id}\'")
                     cur.execute(f"ALTER USER {current_id} WITH PASSWORD %s", (input_password,))
                     con.commit()
                 else:
@@ -294,9 +303,9 @@ def register_product(cur):
     if len(result) == 0:
         product_id = 1
     else:
-        cur.execute("SELECT MAX(product_id) FROM product")
-        result = cur.fetchall()
-        product_id = int(result[0][0]) + 1
+        cur.execute("SELECT MAX(CAST(product_id AS INT)) FROM product")
+        result = cur.fetchone()
+        product_id = result[0] + 1
 
     enterprise_id = current_id
     product_name = input("제품 이름: ")
