@@ -477,10 +477,10 @@ def print_my_product(cur):
         print(f"|{'제품 ID'.center(15)}|{'회사명'.center(15)}|{'상품명'.center(15)}|{'상품 설명'.center(15)}|{'가격'.center(15)}|{'카테고리'.center(15)}|{'인증'.center(15)}|{'판매여부'.center(15)}|")
         for record in result:
             print(f"|{record[6].center(15)}|{record[0].center(15)}|{record[1].center(15)}|{record[2].center(15)}|{str(record[3]).center(15)}|{record[4].center(15)}|{str(record[5]).center(15)}|", end="")
-            if str(record[7]) == "NULL":
-                print("False|")
+            if str(record[7]) == "None":
+                print("False".center(15)+"|")
             else:
-                print("True|")
+                print("True".center(15)+"|")
     else:
         print("비어있음")
     print_boundary()
